@@ -9,24 +9,36 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Fetch HTML
-    const { data } = await axios.get(url, {
+    // Fetch with more forgiving settings
+    const response = await axios.get(url, {
       headers: { "User-Agent": "Mozilla/5.0 (URL Inventory Tool)" },
+      timeout: 8000, // 8 seconds max
+      maxRedirects: 5,
+      validateStatus: () => true, // don't throw on 4xx/5xx
     });
 
-    // Parse HTML with cheerio
-    const $ = cheerio.load(data);
+    if (response.status >= 400) {
+      return res
+        .status(500)
+        .json({ error: `Failed to fetch page. Status: ${response.status}` });
+    }
+
+    // Load into cheerio
+    const $ = cheerio.load(response.data);
     const links = [];
 
     $("a").each((_, el) => {
       let link = $(el).attr("href");
       if (link) {
-        // Convert relative links to absolute
+        // Fix relative links
         if (link.startsWith("/")) {
           const base = new URL(url);
           link = `${base.origin}${link}`;
         }
-        links.push(link);
+        // Skip mailto, tel, javascript links
+        if (!link.startsWith("mailto:") && !link.startsWith("tel:") && !link.startsWith("javascript:")) {
+          links.push(link);
+        }
       }
     });
 
