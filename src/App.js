@@ -8,6 +8,7 @@ function App() {
   const [domain, setDomain] = useState("");
   const [urls, setUrls] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(""); // ✅ new error state
 
   // Handle CSV Upload
   const handleFileUpload = (e) => {
@@ -25,6 +26,7 @@ function App() {
   // Check status of URLs
   const handleCheckStatus = async () => {
     setLoading(true);
+    setError(""); // reset error
     let combined = [];
 
     if (mode === "manual") {
@@ -36,10 +38,20 @@ function App() {
 
     if (mode === "crawl") {
       try {
-        const res = await axios.get(`/api/crawl?url=${encodeURIComponent(domain)}`);
-        combined = res.data.links || [];
+        const res = await axios.get(
+          `/api/crawl?url=${encodeURIComponent(domain)}`
+        );
+
+        if (res.data.success) {
+          combined = res.data.links || [];
+        } else {
+          setError("Crawl failed: " + res.data.error);
+          setLoading(false);
+          return;
+        }
       } catch (err) {
         console.error("Crawl error:", err);
+        setError("Error crawling site. Please try again.");
         setLoading(false);
         return;
       }
@@ -76,7 +88,7 @@ function App() {
     <div className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-4xl mx-auto bg-white p-6 rounded-2xl shadow-md">
         <h1 className="text-2xl font-bold mb-6 text-center text-gray-800">
-          🌐 URL Inventory Tool --
+          🌐 URL Inventory Tool
         </h1>
 
         {/* Mode Tabs */}
@@ -102,6 +114,13 @@ function App() {
             Crawl Domain
           </button>
         </div>
+
+        {/* Error Message */}
+        {error && (
+          <div className="bg-red-100 text-red-700 px-4 py-2 rounded-lg mb-4 text-center">
+            {error}
+          </div>
+        )}
 
         {/* Manual Mode */}
         {mode === "manual" && (
