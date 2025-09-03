@@ -88,7 +88,7 @@ function App() {
     <div className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-4xl mx-auto bg-white p-6 rounded-2xl shadow-md">
         <h1 className="text-2xl font-bold mb-6 text-center text-gray-800">
-          🌐 URL Inventory Tool
+          🌐 URL Inventory Tool!
         </h1>
 
         {/* Mode Tabs */}
