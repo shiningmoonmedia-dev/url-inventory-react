@@ -1,180 +1,191 @@
 import React, { useState } from "react";
-import { saveAs } from "file-saver";
+import axios from "axios";
 
 function App() {
-  const [mode, setMode] = useState("manual"); // "manual" or "crawl"
+  const [mode, setMode] = useState("manual"); // manual or crawl
+  const [inputUrls, setInputUrls] = useState("");
+  const [fileUrls, setFileUrls] = useState([]);
+  const [domain, setDomain] = useState("");
   const [urls, setUrls] = useState([]);
-  const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  // Handle manual paste
-  const handleManualInput = (e) => {
-    const lines = e.target.value.split("\n").map((line) => line.trim()).filter(Boolean);
-    setUrls(lines);
-  };
-
-  // Handle CSV upload
-  const handleFileUpload = async (e) => {
+  // Handle CSV Upload
+  const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
-
-    const text = await file.text();
-    const lines = text.split("\n").map((line) => line.trim()).filter(Boolean);
-    setUrls(lines);
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = event.target.result;
+      const lines = text.split(/\r?\n/).filter((line) => line.trim() !== "");
+      setFileUrls(lines);
+    };
+    reader.readAsText(file);
   };
 
-  // Crawl domain using backend
-  const handleCrawlDomain = async () => {
-    if (urls.length === 0) return alert("Please enter a domain URL first.");
+  // Check status of URLs
+  const handleCheckStatus = async () => {
     setLoading(true);
+    let combined = [];
 
-    try {
-      const res = await fetch(`/api/crawl?url=${encodeURIComponent(urls[0])}`);
-      const data = await res.json();
-      if (data.urls) {
-        setUrls(data.urls);
-      }
-    } catch (err) {
-      console.error("Crawl error:", err);
+    if (mode === "manual") {
+      combined = [
+        ...inputUrls.split(/\r?\n/).filter((u) => u.trim() !== ""),
+        ...fileUrls,
+      ];
     }
-    setLoading(false);
-  };
 
-  // Check status of all URLs
-  const checkUrls = async () => {
-    setLoading(true);
-    const newResults = [];
-
-    for (let url of urls) {
+    if (mode === "crawl") {
       try {
-        const res = await fetch(url, { method: "HEAD" });
-        newResults.push({
-          url,
-          status: res.status,
-          statusText: res.ok ? "✅ OK" : `❌ ${res.status}`,
-        });
+        const res = await axios.get(`/api/crawl?url=${encodeURIComponent(domain)}`);
+        combined = res.data.links || [];
       } catch (err) {
-        newResults.push({ url, status: "Error", statusText: "❌ Failed" });
+        console.error("Crawl error:", err);
+        setLoading(false);
+        return;
       }
     }
 
-    setResults(newResults);
+    // Fetch status codes
+    const results = await Promise.all(
+      combined.map(async (url) => {
+        try {
+          const response = await fetch(url, { method: "HEAD" });
+          return { url, status: response.status };
+        } catch {
+          return { url, status: "Error" };
+        }
+      })
+    );
+
+    setUrls(results);
     setLoading(false);
   };
 
-  // Export table to CSV
-  const exportCSV = () => {
-    const header = "URL,Status,Notes\n";
-    const rows = results.map((r) => `${r.url},${r.status},"${r.statusText}"`).join("\n");
-    const blob = new Blob([header + rows], { type: "text/csv;charset=utf-8" });
-    saveAs(blob, "url_inventory.csv");
-  };
-
-  // Clear table
-  const clearAll = () => {
-    setUrls([]);
-    setResults([]);
+  // Export as CSV
+  const handleExportCSV = () => {
+    const header = "URL,Status\n";
+    const rows = urls.map((u) => `${u.url},${u.status}`).join("\n");
+    const blob = new Blob([header + rows], { type: "text/csv" });
+    const link = document.createElement("a");
+    link.href = window.URL.createObjectURL(blob);
+    link.download = "url-inventory.csv";
+    link.click();
   };
 
   return (
     <div className="min-h-screen bg-gray-50 p-6">
-      <div className="max-w-5xl mx-auto">
-        <h1 className="text-3xl font-bold text-center mb-6 text-blue-700">
+      <div className="max-w-4xl mx-auto bg-white p-6 rounded-2xl shadow-md">
+        <h1 className="text-2xl font-bold mb-6 text-center text-gray-800">
           🌐 URL Inventory Tool
         </h1>
 
-        {/* Mode Toggle */}
-        <div className="flex justify-center gap-4 mb-6">
+        {/* Mode Tabs */}
+        <div className="flex gap-3 mb-6 justify-center">
           <button
             onClick={() => setMode("manual")}
-            className={`px-4 py-2 rounded-lg shadow ${mode === "manual" ? "bg-blue-600 text-white" : "bg-white border"}`}
+            className={`px-4 py-2 rounded-lg ${
+              mode === "manual"
+                ? "bg-blue-600 text-white shadow"
+                : "bg-gray-200 text-gray-700"
+            }`}
           >
             Manual URLs / CSV
           </button>
           <button
             onClick={() => setMode("crawl")}
-            className={`px-4 py-2 rounded-lg shadow ${mode === "crawl" ? "bg-blue-600 text-white" : "bg-white border"}`}
+            className={`px-4 py-2 rounded-lg ${
+              mode === "crawl"
+                ? "bg-blue-600 text-white shadow"
+                : "bg-gray-200 text-gray-700"
+            }`}
           >
             Crawl Domain
           </button>
         </div>
 
-        {/* Input Section */}
+        {/* Manual Mode */}
         {mode === "manual" && (
-          <div className="bg-white p-4 rounded-lg shadow mb-6">
+          <div>
             <textarea
-              placeholder="Paste URLs here, one per line..."
-              className="w-full border rounded-lg p-2 mb-3"
+              value={inputUrls}
+              onChange={(e) => setInputUrls(e.target.value)}
+              placeholder="Paste URLs here (one per line)..."
               rows={5}
-              onChange={handleManualInput}
+              className="w-full p-3 border rounded-lg shadow-sm focus:ring-2 focus:ring-blue-400"
             />
-            <input type="file" accept=".csv,.txt" onChange={handleFileUpload} />
+            <div className="mt-4 flex items-center gap-3">
+              <input
+                type="file"
+                accept=".csv,.txt"
+                onChange={handleFileUpload}
+                className="block w-full text-sm text-gray-700 border rounded-lg cursor-pointer focus:outline-none"
+              />
+            </div>
           </div>
         )}
 
+        {/* Crawl Mode */}
         {mode === "crawl" && (
-          <div className="bg-white p-4 rounded-lg shadow mb-6">
+          <div>
             <input
               type="text"
-              placeholder="Enter domain (e.g., https://example.com)"
-              className="w-full border rounded-lg p-2 mb-3"
-              onChange={(e) => setUrls([e.target.value])}
+              placeholder="Enter domain e.g. https://example.com"
+              value={domain}
+              onChange={(e) => setDomain(e.target.value)}
+              className="w-full p-3 border rounded-lg shadow-sm focus:ring-2 focus:ring-blue-400"
             />
-            <button
-              onClick={handleCrawlDomain}
-              className="px-4 py-2 bg-green-600 text-white rounded-lg shadow hover:bg-green-700"
-            >
-              {loading ? "Crawling..." : "Crawl Domain"}
-            </button>
           </div>
         )}
 
         {/* Action Buttons */}
-        <div className="flex gap-4 mb-6">
+        <div className="mt-6 flex justify-center gap-4">
           <button
-            onClick={checkUrls}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg shadow hover:bg-blue-700"
+            onClick={handleCheckStatus}
+            className="bg-green-600 text-white px-4 py-2 rounded-lg shadow hover:bg-green-700 transition disabled:opacity-50"
+            disabled={loading}
           >
-            {loading ? "Checking..." : "Check Status"}
+            {loading ? "Processing..." : "Check Status"}
           </button>
           <button
-            onClick={exportCSV}
-            className="px-4 py-2 bg-yellow-500 text-white rounded-lg shadow hover:bg-yellow-600"
-            disabled={results.length === 0}
+            onClick={handleExportCSV}
+            className="bg-blue-600 text-white px-4 py-2 rounded-lg shadow hover:bg-blue-700 transition"
           >
             Export CSV
-          </button>
-          <button
-            onClick={clearAll}
-            className="px-4 py-2 bg-red-600 text-white rounded-lg shadow hover:bg-red-700"
-          >
-            Clear
           </button>
         </div>
 
         {/* Results Table */}
-        {results.length > 0 && (
-          <div className="overflow-x-auto bg-white rounded-lg shadow">
-            <table className="min-w-full border">
-              <thead className="bg-gray-100">
-                <tr>
-                  <th className="px-4 py-2 border">URL</th>
-                  <th className="px-4 py-2 border">Status</th>
-                  <th className="px-4 py-2 border">Notes</th>
+        {urls.length > 0 && (
+          <div className="mt-8 overflow-x-auto">
+            <table className="w-full border-collapse text-sm">
+              <thead>
+                <tr className="bg-gray-100 text-left">
+                  <th className="p-2 border">#</th>
+                  <th className="p-2 border">URL</th>
+                  <th className="p-2 border">Status</th>
                 </tr>
               </thead>
               <tbody>
-                {results.map((r, i) => (
-                  <tr key={i} className="hover:bg-gray-50">
-                    <td className="px-4 py-2 border text-blue-600 break-all">{r.url}</td>
-                    <td className="px-4 py-2 border text-center">
-                      {r.status === 200 ? (
-                        <span className="text-green-600 font-semibold">✅ 200</span>
-                      ) : (
-                        <span className="text-red-600 font-semibold">{r.statusText}</span>
-                      )}
+                {urls.map((u, i) => (
+                  <tr
+                    key={i}
+                    className="odd:bg-white even:bg-gray-50 hover:bg-gray-100"
+                  >
+                    <td className="p-2 border">{i + 1}</td>
+                    <td className="p-2 border">{u.url}</td>
+                    <td className="p-2 border">
+                      <span
+                        className={`px-2 py-1 rounded text-xs ${
+                          u.status === 200
+                            ? "bg-green-100 text-green-700"
+                            : u.status === "Error"
+                            ? "bg-red-100 text-red-700"
+                            : "bg-yellow-100 text-yellow-700"
+                        }`}
+                      >
+                        {u.status}
+                      </span>
                     </td>
-                    <td className="px-4 py-2 border">{r.statusText}</td>
                   </tr>
                 ))}
               </tbody>
