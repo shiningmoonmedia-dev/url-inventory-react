@@ -2,41 +2,40 @@ import axios from "axios";
 import * as cheerio from "cheerio";
 
 export default async function handler(req, res) {
-  try {
-    const { url } = req.query;
-    if (!url) {
-      return res.status(400).json({ error: "Missing URL parameter" });
-    }
+  const { url } = req.query;
 
-    // Fetch page HTML
+  if (!url) {
+    return res.status(400).json({ error: "Missing URL" });
+  }
+
+  try {
+    // Fetch HTML
     const { data } = await axios.get(url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (URL-Inventory-Tool)"
-      }
+      headers: { "User-Agent": "Mozilla/5.0 (URL Inventory Tool)" },
     });
 
-    // Load into Cheerio
+    // Parse HTML with cheerio
     const $ = cheerio.load(data);
-    let links = [];
+    const links = [];
 
     $("a").each((_, el) => {
-      let href = $(el).attr("href");
-      if (href && href.startsWith("http")) {
-        links.push(href);
+      let link = $(el).attr("href");
+      if (link) {
+        // Convert relative links to absolute
+        if (link.startsWith("/")) {
+          const base = new URL(url);
+          link = `${base.origin}${link}`;
+        }
+        links.push(link);
       }
     });
 
-    // Remove duplicates
-    links = [...new Set(links)];
+    // Deduplicate
+    const uniqueLinks = [...new Set(links)];
 
-    res.status(200).json({
-      domain: url,
-      totalLinks: links.length,
-      links
-    });
-
+    res.status(200).json({ links: uniqueLinks });
   } catch (err) {
     console.error("Crawl error:", err.message);
-    res.status(500).json({ error: "Crawl failed", details: err.message });
+    res.status(500).json({ error: "Failed to crawl domain" });
   }
 }
