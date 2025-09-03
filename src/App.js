@@ -1,172 +1,189 @@
 import React, { useState } from "react";
-import { ClipboardList, RefreshCw, FileDown, Trash2, Globe } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Card, CardHeader, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
 
-export default function App() {
+function App() {
+  const [mode, setMode] = useState("manual"); // "manual" or "crawl"
   const [urls, setUrls] = useState([]);
-  const [mode, setMode] = useState("single"); // "single" or "crawl"
-  const [domain, setDomain] = useState("");
+  const [results, setResults] = useState([]);
+  const [loading, setLoading] = useState(false);
 
-  const handlePaste = () => {
-    navigator.clipboard.readText().then((text) => {
-      const newUrls = text.split(/\s+/).filter(Boolean);
-      setUrls([...urls, ...newUrls.map((url) => ({ url, status: "Pending" }))]);
-    });
+  // Handle manual paste
+  const handleManualInput = (e) => {
+    const lines = e.target.value.split("\n").map((line) => line.trim()).filter(Boolean);
+    setUrls(lines);
   };
 
-  const handleFile = (e) => {
+  // Handle CSV upload
+  const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      const data = new Uint8Array(evt.target.result);
-      const workbook = XLSX.read(data, { type: "array" });
-      const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      const json = XLSX.utils.sheet_to_json(sheet, { header: 1 });
-      const header = json[0];
-      const urlCol = header.findIndex((h) => /url|link/i.test(h)) || 0;
-      const newUrls = json.slice(1).map((row) => row[urlCol]).filter(Boolean);
-      setUrls([...urls, ...newUrls.map((url) => ({ url, status: "Pending" }))]);
-    };
-    reader.readAsArrayBuffer(file);
+
+    const text = await file.text();
+    const lines = text.split("\n").map((line) => line.trim()).filter(Boolean);
+    setUrls(lines);
   };
 
-  const crawlDomain = async () => {
-    if (!domain) return;
+  // Crawl domain using backend
+  const handleCrawlDomain = async () => {
+    if (urls.length === 0) return alert("Please enter a domain URL first.");
+    setLoading(true);
+
     try {
-      const res = await fetch(`/api/crawl?url=${encodeURIComponent(domain)}`);
+      const res = await fetch(`/api/crawl?url=${encodeURIComponent(urls[0])}`);
       const data = await res.json();
-      setUrls(data.urls.map((url) => ({ url, status: "Pending" })));
+      if (data.urls) {
+        setUrls(data.urls);
+      }
     } catch (err) {
-      alert("Failed to crawl domain. Please check your backend.");
+      console.error("Crawl error:", err);
     }
+    setLoading(false);
   };
 
-  const checkStatuses = async () => {
-    const updated = await Promise.all(
-      urls.map(async (item) => {
-        try {
-          const res = await fetch(item.url, { method: "HEAD" });
-          return { ...item, status: res.ok ? "✅ OK" : `❌ ${res.status}` };
-        } catch (err) {
-          return { ...item, status: "⚠️ Error" };
-        }
-      })
-    );
-    setUrls(updated);
+  // Check status of all URLs
+  const checkUrls = async () => {
+    setLoading(true);
+    const newResults = [];
+
+    for (let url of urls) {
+      try {
+        const res = await fetch(url, { method: "HEAD" });
+        newResults.push({
+          url,
+          status: res.status,
+          statusText: res.ok ? "✅ OK" : `❌ ${res.status}`,
+        });
+      } catch (err) {
+        newResults.push({ url, status: "Error", statusText: "❌ Failed" });
+      }
+    }
+
+    setResults(newResults);
+    setLoading(false);
   };
 
+  // Export table to CSV
   const exportCSV = () => {
-    const ws = XLSX.utils.json_to_sheet(urls);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "URLs");
-    const buf = XLSX.write(wb, { bookType: "csv", type: "array" });
-    saveAs(new Blob([buf], { type: "text/csv" }), "url_inventory.csv");
+    const header = "URL,Status,Notes\n";
+    const rows = results.map((r) => `${r.url},${r.status},"${r.statusText}"`).join("\n");
+    const blob = new Blob([header + rows], { type: "text/csv;charset=utf-8" });
+    saveAs(blob, "url_inventory.csv");
+  };
+
+  // Clear table
+  const clearAll = () => {
+    setUrls([]);
+    setResults([]);
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col items-center py-10 px-4">
-      <Card className="w-full max-w-5xl shadow-xl">
-        <CardHeader className="text-center space-y-2">
-          <h1 className="text-3xl font-bold tracking-tight">🌐 URL Inventory Hybrid App</h1>
-          <p className="text-gray-500">Check single URLs or crawl entire domains.</p>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          {/* Mode Selector */}
-          <div className="flex justify-center gap-4 mb-4">
-            <Button variant={mode === "single" ? "default" : "outline"} onClick={() => setMode("single")}>
-              Single URL / CSV Upload
-            </Button>
-            <Button variant={mode === "crawl" ? "default" : "outline"} onClick={() => setMode("crawl")}>
-              Crawl Domain
-            </Button>
+    <div className="min-h-screen bg-gray-50 p-6">
+      <div className="max-w-5xl mx-auto">
+        <h1 className="text-3xl font-bold text-center mb-6 text-blue-700">
+          🌐 URL Inventory Tool
+        </h1>
+
+        {/* Mode Toggle */}
+        <div className="flex justify-center gap-4 mb-6">
+          <button
+            onClick={() => setMode("manual")}
+            className={`px-4 py-2 rounded-lg shadow ${mode === "manual" ? "bg-blue-600 text-white" : "bg-white border"}`}
+          >
+            Manual URLs / CSV
+          </button>
+          <button
+            onClick={() => setMode("crawl")}
+            className={`px-4 py-2 rounded-lg shadow ${mode === "crawl" ? "bg-blue-600 text-white" : "bg-white border"}`}
+          >
+            Crawl Domain
+          </button>
+        </div>
+
+        {/* Input Section */}
+        {mode === "manual" && (
+          <div className="bg-white p-4 rounded-lg shadow mb-6">
+            <textarea
+              placeholder="Paste URLs here, one per line..."
+              className="w-full border rounded-lg p-2 mb-3"
+              rows={5}
+              onChange={handleManualInput}
+            />
+            <input type="file" accept=".csv,.txt" onChange={handleFileUpload} />
           </div>
+        )}
 
-          {mode === "single" ? (
-            <div className="grid gap-4 md:grid-cols-2">
-              <Textarea
-                placeholder="Paste URLs (one per line or space separated)"
-                className="h-32"
-                onChange={(e) =>
-                  setUrls(e.target.value.split(/\s+/).filter(Boolean).map((url) => ({ url, status: "Pending" })))
-                }
-              />
-              <div className="flex flex-col gap-4">
-                <Button variant="outline" onClick={handlePaste}>
-                  <ClipboardList className="mr-2 h-4 w-4" /> Paste from Clipboard
-                </Button>
-                <div>
-                  <label className="block mb-1 text-sm font-medium">Upload CSV/Excel</label>
-                  <Input type="file" accept=".csv,.xlsx" onChange={handleFile} />
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="flex flex-col md:flex-row gap-4 items-center">
-              <Input
-                placeholder="Enter domain e.g. https://example.com"
-                value={domain}
-                onChange={(e) => setDomain(e.target.value)}
-              />
-              <Button onClick={crawlDomain}>
-                <Globe className="mr-2 h-4 w-4" /> Crawl Website
-              </Button>
-            </div>
-          )}
-
-          {/* Actions */}
-          <div className="flex flex-wrap gap-3 justify-center">
-            <Button onClick={checkStatuses}>
-              <RefreshCw className="mr-2 h-4 w-4" /> Check Status
-            </Button>
-            <Button onClick={exportCSV} variant="secondary">
-              <FileDown className="mr-2 h-4 w-4" /> Export CSV
-            </Button>
-            <Button variant="destructive" onClick={() => setUrls([])}>
-              <Trash2 className="mr-2 h-4 w-4" /> Clear
-            </Button>
+        {mode === "crawl" && (
+          <div className="bg-white p-4 rounded-lg shadow mb-6">
+            <input
+              type="text"
+              placeholder="Enter domain (e.g., https://example.com)"
+              className="w-full border rounded-lg p-2 mb-3"
+              onChange={(e) => setUrls([e.target.value])}
+            />
+            <button
+              onClick={handleCrawlDomain}
+              className="px-4 py-2 bg-green-600 text-white rounded-lg shadow hover:bg-green-700"
+            >
+              {loading ? "Crawling..." : "Crawl Domain"}
+            </button>
           </div>
+        )}
 
-          {/* URL Table */}
-          <div className="overflow-x-auto">
-            <table className="min-w-full border rounded-lg">
-              <thead className="bg-gray-100 text-gray-700">
+        {/* Action Buttons */}
+        <div className="flex gap-4 mb-6">
+          <button
+            onClick={checkUrls}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg shadow hover:bg-blue-700"
+          >
+            {loading ? "Checking..." : "Check Status"}
+          </button>
+          <button
+            onClick={exportCSV}
+            className="px-4 py-2 bg-yellow-500 text-white rounded-lg shadow hover:bg-yellow-600"
+            disabled={results.length === 0}
+          >
+            Export CSV
+          </button>
+          <button
+            onClick={clearAll}
+            className="px-4 py-2 bg-red-600 text-white rounded-lg shadow hover:bg-red-700"
+          >
+            Clear
+          </button>
+        </div>
+
+        {/* Results Table */}
+        {results.length > 0 && (
+          <div className="overflow-x-auto bg-white rounded-lg shadow">
+            <table className="min-w-full border">
+              <thead className="bg-gray-100">
                 <tr>
-                  <th className="px-4 py-2 text-left">#</th>
-                  <th className="px-4 py-2 text-left">URL</th>
-                  <th className="px-4 py-2 text-left">Status</th>
+                  <th className="px-4 py-2 border">URL</th>
+                  <th className="px-4 py-2 border">Status</th>
+                  <th className="px-4 py-2 border">Notes</th>
                 </tr>
               </thead>
               <tbody>
-                {urls.length === 0 ? (
-                  <tr>
-                    <td colSpan="3" className="text-center py-4 text-gray-500">
-                      No URLs added yet.
+                {results.map((r, i) => (
+                  <tr key={i} className="hover:bg-gray-50">
+                    <td className="px-4 py-2 border text-blue-600 break-all">{r.url}</td>
+                    <td className="px-4 py-2 border text-center">
+                      {r.status === 200 ? (
+                        <span className="text-green-600 font-semibold">✅ 200</span>
+                      ) : (
+                        <span className="text-red-600 font-semibold">{r.statusText}</span>
+                      )}
                     </td>
+                    <td className="px-4 py-2 border">{r.statusText}</td>
                   </tr>
-                ) : (
-                  urls.map((item, i) => (
-                    <tr key={i} className="border-t hover:bg-gray-50">
-                      <td className="px-4 py-2">{i + 1}</td>
-                      <td className="px-4 py-2 text-blue-600 truncate max-w-xs">
-                        <a href={item.url} target="_blank" rel="noopener noreferrer">
-                          {item.url}
-                        </a>
-                      </td>
-                      <td className="px-4 py-2">{item.status}</td>
-                    </tr>
-                  ))
-                )}
+                ))}
               </tbody>
             </table>
           </div>
-        </CardContent>
-      </Card>
+        )}
+      </div>
     </div>
   );
 }
+
+export default App;
